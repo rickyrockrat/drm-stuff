@@ -167,14 +167,13 @@ int main(void)
 	seldev=0;
 	for(i = 0; i < num_devices; i++)
 	{
-		const char *devstr = _eglQueryDeviceStringEXT(devices[i],
-			EGL_DRM_DEVICE_FILE_EXT);
+		const char *devstr = _eglQueryDeviceStringEXT(devices[i],	EGL_DRM_DEVICE_FILE_EXT);
 		printf("Device 0x%.8lx: %s\n", (unsigned long)devices[i],
 			devstr ? devstr : "NULL");
 		if(NULL != devstr)
 			seldev=i;
 	}
-
+	printf("Selected device %d\n",seldev);
 	if((dpy = _eglGetPlatformDisplayEXT(EGL_PLATFORM_DEVICE_EXT,		devices[seldev], NULL)) == NULL)
 		THROWEGL();
 	if(!eglInitialize(dpy, &major, &minor))

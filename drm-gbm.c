@@ -27,6 +27,16 @@ static uint32_t connector_id;
 static drmModeModeInfo mode_info;
 static drmModeCrtc *crtc;
 
+void print_modeinfo(drmModeModeInfo  *m)
+{
+	printf("%s: clock %d hdisplay %d vdisplay %d vrefresh %d\n",
+		m->name,m->clock,m->hdisplay, m->vdisplay,m->vrefresh);
+	printf("   hsyncstart %d hsyncend %d htotal %d hskew %d\n",
+		m->hsync_start, m->hsync_end, m->htotal, m->hskew);
+	printf("   vsyncstart %d, vsyncend %d, vtotal %d, vscan %d\n",
+		m->vsync_start, m->vsync_end, m->vtotal, m->vscan);
+}
+
 /***************************************************************************/
 /** .
 \n\b Arguments:
@@ -70,12 +80,16 @@ static drmModeEncoder *find_encoder (drmModeRes *resources, drmModeConnector *co
 ****************************************************************************/
 static void find_display_configuration () 
 {
+	int i;
 	drmModeRes *resources = drmModeGetResources (device);
 	// find a connector
 	drmModeConnector *connector = find_connector (resources);
 	if (!connector) EXIT ("no connector found\n");
 	// save the connector_id
 	connector_id = connector->connector_id;
+	/* print the modes */
+	for (i=0; i< connector->count_mode; ++i)
+		print_modeinfo(&connector->modes[i]);
 	// save the first mode
 	mode_info = connector->modes[0];
 	printf ("resolution: %ix%i\n", mode_info.hdisplay, mode_info.vdisplay);
@@ -98,7 +112,7 @@ static void find_display_configuration ()
 \n\b Arguments:
 \n\b Returns:
 ****************************************************************************/
-static void setup_opengl () 
+static void setup_opengl (int render_only) 
 {
 	EGLConfig config;
 	EGLint num_config;
@@ -108,10 +122,16 @@ static void setup_opengl ()
 	
 	// create an OpenGL context
 	eglBindAPI (EGL_OPENGL_API);
-	EGLint attributes[] = {
+	EGLint native attributes[] = {
 		EGL_RED_SIZE, 8,
 		EGL_GREEN_SIZE, 8,
 		EGL_BLUE_SIZE, 8,
+	EGL_NONE};
+	EGLint offscreen attributes[] = {
+		EGL_RED_SIZE, 8,
+		EGL_GREEN_SIZE, 8,
+		EGL_BLUE_SIZE, 8,
+	  EGL_TEXTURE_TARGET,EGL_TEXTURE_2D,
 	EGL_NONE};
 	
 	eglChooseConfig (display, attributes, &config, 1, &num_config);
@@ -197,3 +217,78 @@ int main () {
 	close (device);
 	return 0;
 }
+
+#if pixmap_surface
+void
+die(const char * errstr, ...) {
+    va_list ap;
+    va_start(ap, errstr);
+    vfprintf(stderr, errstr, ap);
+    va_end(ap);
+    exit(1);
+}
+
+int main() {
+    Display * display = XOpenDisplay(NULL);
+    if (!display) die("Can't create xlib display.\n");
+    int screen = XDefaultScreen(display);
+    GC gc = XDefaultGC(display, screen);
+    Window root_window = XRootWindow(display, screen);
+    unsigned long black_pixel = XBlackPixel(display, screen);
+    unsigned long white_pixel = XWhitePixel(display, screen);
+    Window window = XCreateSimpleWindow(display, root_window, 0, 0, 640, 480,
+        0, black_pixel, white_pixel);
+    if (!window) die("Can't create window.\n");
+    int res = XSelectInput(display, window, ExposureMask);
+    if (!res) die("XSelectInput failed.\n");
+    Pixmap pixmap = XCreatePixmap(display, window, 400, 400, 24);
+    if (!pixmap) die("Can't create pixmap.\n");
+    EGLDisplay egldisplay = eglGetDisplay(display);
+    if (EGL_NO_DISPLAY == egldisplay) die("Can't cate egl display.\n");
+    res = eglInitialize(egldisplay, NULL, NULL);
+    if (!res) die("eglInitialize failed.\n");
+    EGLConfig config;
+    int num_configs;
+    static int attrib_list[] = {
+        EGL_RED_SIZE,           8,
+        EGL_GREEN_SIZE,         8,
+        EGL_BLUE_SIZE,          8,
+        EGL_ALPHA_SIZE,         0,
+        EGL_RENDERABLE_TYPE,    EGL_OPENGL_BIT,
+        EGL_SURFACE_TYPE,       EGL_PIXMAP_BIT,
+        EGL_NONE
+    };
+    res = eglChooseConfig(egldisplay, attrib_list, &config, 1, &num_configs);
+    if (!res) die("eglChooseConfig failed.\n");
+    if (0 == num_configs) die("No appropriate egl config found.\n");
+    EGLSurface surface =
+        eglCreatePixmapSurface(egldisplay, config, pixmap, NULL);
+    if (EGL_NO_SURFACE == surface) die("Can't create egl pixmap surface.\n");
+    res = eglBindAPI(EGL_OPENGL_API);
+    if (!res) die("eglBindApi failed.\n");
+    EGLContext context =
+        eglCreateContext(egldisplay, config, EGL_NO_CONTEXT, NULL);
+    if (EGL_NO_CONTEXT == config) die("Can't create egl context.\n");
+    res = eglMakeCurrent(egldisplay, surface, surface, context);
+    if (!res) die("eglMakeCurrent failed.\n");
+    res = XMapWindow(display, window);
+    if (!res) die("XMapWindow failed.\n");
+    while (1) {
+        XEvent event;
+        res = XNextEvent(display, &event);
+        if (Expose != event.type) continue;
+        glClearColor(0, 0, 1, 1);
+        glClear(GL_COLOR_BUFFER_BIT);
+        glFinish();
+        res = eglWaitGL();
+        if (!res) die("eglWaitGL failed.\n");
+        res = XCopyArea(display, pixmap, window, gc, 0, 0, 400, 400, 0, 0);
+        if (!res) die("XCopyArea failed.\n");
+    }
+}
+
+c
+opengl
+xlib
+egl
+#endif
