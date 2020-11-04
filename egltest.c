@@ -134,7 +134,7 @@ PFNEGLGETPLATFORMDISPLAYEXTPROC _eglGetPlatformDisplayEXT = NULL;
 
 int main(void)
 {
-	int num_devices = 0, i;
+	int num_devices = 0, i, seldev;
 	EGLDeviceEXT *devices = NULL;
 	EGLDisplay dpy = NULL;
 	EGLConfig *configs = NULL;
@@ -164,17 +164,18 @@ int main(void)
 		THROW("Memory allocation failure");
 	if(!_eglQueryDevicesEXT(num_devices, devices, &num_devices) || num_devices<1)
 		THROWEGL();
-
+	seldev=0;
 	for(i = 0; i < num_devices; i++)
 	{
 		const char *devstr = _eglQueryDeviceStringEXT(devices[i],
 			EGL_DRM_DEVICE_FILE_EXT);
 		printf("Device 0x%.8lx: %s\n", (unsigned long)devices[i],
 			devstr ? devstr : "NULL");
+		if(NULL != devstr)
+			seldev=i;
 	}
 
-	if((dpy = _eglGetPlatformDisplayEXT(EGL_PLATFORM_DEVICE_EXT,
-		devices[0], NULL)) == NULL)
+	if((dpy = _eglGetPlatformDisplayEXT(EGL_PLATFORM_DEVICE_EXT,		devices[seldev], NULL)) == NULL)
 		THROWEGL();
 	if(!eglInitialize(dpy, &major, &minor))
 		THROWEGL();
