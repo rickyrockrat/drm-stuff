@@ -1,7 +1,11 @@
-all: drm-gbm 
+all: drm-gbm egltest
+
+CC?=gcc
 
 drm-gbm: drm-gbm.c
-	gcc -o $@ $< -ldrm -lgbm -lEGL -lGL -I/usr/include/libdrm
+	$(CC) -o $@ $< -ldrm -lgbm -lEGL -lGL -I/usr/include/libdrm
+	
+egltest: egltest.c
+	$(CC) -O3 -Wall -Werror -I. -o $@ $^ -lOpenGL -lEGL
 
-te
 
