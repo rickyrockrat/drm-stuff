@@ -88,7 +88,7 @@ static void find_display_configuration ()
 	// save the connector_id
 	connector_id = connector->connector_id;
 	/* print the modes */
-	for (i=0; i< connector->count_mode; ++i)
+	for (i=0; i< connector->count_modes; ++i)
 		print_modeinfo(&connector->modes[i]);
 	// save the first mode
 	mode_info = connector->modes[0];
@@ -122,19 +122,20 @@ static void setup_opengl (int render_only)
 	
 	// create an OpenGL context
 	eglBindAPI (EGL_OPENGL_API);
-	EGLint native attributes[] = {
+	EGLint native_attributes[] = {
 		EGL_RED_SIZE, 8,
 		EGL_GREEN_SIZE, 8,
 		EGL_BLUE_SIZE, 8,
 	EGL_NONE};
-	EGLint offscreen attributes[] = {
+
+	EGLint offscreen_attributes[] = {
 		EGL_RED_SIZE, 8,
 		EGL_GREEN_SIZE, 8,
 		EGL_BLUE_SIZE, 8,
 	  EGL_TEXTURE_TARGET,EGL_TEXTURE_2D,
 	EGL_NONE};
 	
-	eglChooseConfig (display, attributes, &config, 1, &num_config);
+	eglChooseConfig (display, native_attributes, &config, 1, &num_config);
 	context = eglCreateContext (display, config, EGL_NO_CONTEXT, NULL);
 	
 	// create the GBM and EGL surface
@@ -155,8 +156,14 @@ static void swap_buffers () {
 	uint32_t handle = gbm_bo_get_handle (bo).u32;
 	uint32_t pitch = gbm_bo_get_stride (bo);
 	uint32_t fb;
-	drmModeAddFB (device, mode_info.hdisplay, mode_info.vdisplay, 24, 32, pitch, handle, &fb);
-	drmModeSetCrtc (device, crtc->crtc_id, fb, 0, 0, &connector_id, 1, &mode_info);
+	if(drmModeAddFB (device, mode_info.hdisplay, mode_info.vdisplay, 24, 32, pitch, handle, &fb)){
+		printf("drmModeAddFB() failed\n");
+		return;
+	}
+	if(drmModeSetCrtc (device, crtc->crtc_id, fb, 0, 0, &connector_id, 1, &mode_info)){
+		printf("drmModeSetCrtc() failed in proc %d @ %d\n",__LINE__, getpid());
+		return;
+	}
 	
 	if (previous_bo) {
 		drmModeRmFB (device, previous_fb);
@@ -171,10 +178,16 @@ static void swap_buffers () {
 \n\b Arguments:
 \n\b Returns:
 ****************************************************************************/
-static void draw (float progress) {
+static void draw (int master, float progress) {
+	GLenum err;
 	glClearColor (1.0f-progress, progress, 0.0, 1.0);
+	if((err=glGetError()) != GL_NO_ERROR)
+		printf("glClearColor error %d\n",err);
 	glClear (GL_COLOR_BUFFER_BIT);
-	swap_buffers ();
+	if((err=glGetError()) != GL_NO_ERROR)
+                printf("glClear error %d\n",err);
+	if(master)
+		swap_buffers ();
 }
 
 /***************************************************************************/
@@ -204,14 +217,18 @@ static void clean_up () {
 \n\b Arguments:
 \n\b Returns:
 ****************************************************************************/
-int main () {
+int main (int argc, char *argv[]) {
+	int master=1;
+	if(argc>1)
+		master=strtoul(argv[1],NULL,10);
+	printf("pid %d, I am %s\n",getpid(),1==master?"master":"Not master");
 	device = open ("/dev/dri/card0", O_RDWR|O_CLOEXEC);
 	find_display_configuration ();
-	setup_opengl ();
+	setup_opengl (master);
 	
 	int i;
 	for (i = 0; i < 600; i++)
-		draw (i / 600.0f);
+		draw (master, i / 600.0f);
 	
 	clean_up ();
 	close (device);
