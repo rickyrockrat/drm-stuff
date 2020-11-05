@@ -1,9 +1,12 @@
 This is a collection of bits and pieces of code around the 'net and my experiments with them  
   
 The main focus is understanding DRM at the lowest possible level, but also delving into  
-the spiderwebs of GPU rendering, so things like OpenGL and ESL come creaping around.
+the spiderwebs of GPU rendering, so things like OpenGL and ESL come creaping around with  
+their jaws of dripping icor.
 
-So far the work is in the public domain, but just for clarity, 
+So far the work is in the public domain, unless specified in the header of the file.  
+
+Just for clarity, 
 
 This is free and unencumbered software released into the public domain.  
   
