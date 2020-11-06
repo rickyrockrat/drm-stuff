@@ -9,11 +9,11 @@ egltest: egltest.c
 	$(CC) -O3 -Wall -Werror -I. -o $@ $^ -lOpenGL -lEGL
 
 drm_test: drm_test.c
-	$(CC) -Wall $< -o $@ $$(pkg-config --cflags --libs libdrm
+	$(CC) -Wall $< -o $@ $$(pkg-config --cflags --libs libdrm)
 	
 drm-prime-dumb-kms: drm-prime-dumb-kms.c
-	$(CC) -O3 -Wall -Werror -I. -o $@ $^
+	$(CC) -O3 -Wall -Werror -I. -o $@ $^ $$(pkg-config --cflags --libs libdrm)
 	
 modeset-double-buffered: modeset-double-buffered.c
-	$(CC) -O3 -Wall -Werror -I. -o $@ $^
+	$(CC) -O3 -Wall -Werror -I. -o $@ $^ $$(pkg-config --cflags --libs libdrm)
 
