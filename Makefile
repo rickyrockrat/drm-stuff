@@ -1,9 +1,14 @@
-all: drm-gbm egltest drm_test drm-prime-dumb-kms modeset-double-buffered
+TARGS=drm-gbm egltest drm_test drm-prime-dumb-kms modeset-double-buffered
+all: 	$(TARGS)
+
 
 CC?=gcc
 
-drm-gbm: drm-gbm.c
-	$(CC) -o $@ $< -ldrm -lgbm -lEGL -lGL -I/usr/include/libdrm
+%.o:%.c
+	$(CC) -Wall -c -o $@ $< $$(pkg-config --cflags libdrm)
+
+drm-gbm: drm-gbm.o open_egl.o
+	$(CC) -o $@ $^ -ldrm -lgbm -lEGL -lGL -I/usr/include/libdrm
 	
 egltest: egltest.c
 	$(CC) -O3 -Wall -Werror -I. -o $@ $^ -lOpenGL -lEGL
@@ -16,4 +21,8 @@ drm-prime-dumb-kms: drm-prime-dumb-kms.c
 	
 modeset-double-buffered: modeset-double-buffered.c
 	$(CC) -O3 -Wall -Werror -I. -o $@ $^ $$(pkg-config --cflags --libs libdrm)
+	
+
+clean:
+	-rm *.o $(TARGS)
 

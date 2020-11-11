@@ -1,127 +1,89 @@
 // gcc -o drm-gbm drm-gbm.c -ldrm -lgbm -lEGL -lGL -I/usr/include/libdrm
+#include "open_egl.h"
 
 // general documentation: man drm
 
-#include <xf86drm.h>
-#include <xf86drmMode.h>
-#include <gbm.h>
-#include <EGL/egl.h>
-#include <GL/gl.h>
-#include <stdlib.h>
-#include <fcntl.h>
-#include <unistd.h>
-#include <stdio.h>
 
-#define EXIT(msg) { fputs (msg, stderr); exit (EXIT_FAILURE); }
 
-static int device;
-
-static struct gbm_device *gbm_device;
-static EGLDisplay display;
-static EGLContext context;
-static struct gbm_surface *gbm_surface;
-static EGLSurface egl_surface;
-static struct gbm_bo *previous_bo = NULL;
-static uint32_t previous_fb;
-static uint32_t connector_id;
-static drmModeModeInfo mode_info;
-static drmModeCrtc *crtc;
-
-void print_modeinfo(drmModeModeInfo  *m)
-{
-	printf("%s: clock %d hdisplay %d vdisplay %d vrefresh %d\n",
-		m->name,m->clock,m->hdisplay, m->vdisplay,m->vrefresh);
-	printf("   hsyncstart %d hsyncend %d htotal %d hskew %d\n",
-		m->hsync_start, m->hsync_end, m->htotal, m->hskew);
-	printf("   vsyncstart %d, vsyncend %d, vtotal %d, vscan %d\n",
-		m->vsync_start, m->vsync_end, m->vtotal, m->vscan);
-}
 
 /***************************************************************************/
 /** .
 \n\b Arguments:
 \n\b Returns:
 ****************************************************************************/
-static drmModeConnector *find_connector (drmModeRes *resources) 
-{
-	// iterate the connectors
-	int i;
-	for (i=0; i<resources->count_connectors; i++) {
-		drmModeConnector *connector = drmModeGetConnector (device, resources->connectors[i]);
-		// pick the first connected connector
-		if (connector->connection == DRM_MODE_CONNECTED) {
-			return connector;
-		}
-		drmModeFreeConnector (connector);
+static void swap_buffers (struct drm_gpu *g) {
+	eglSwapBuffers (g->display, g->egl_surface);
+	struct gbm_bo *bo = gbm_surface_lock_front_buffer (g->gbm_surface);
+	uint32_t handle = gbm_bo_get_handle (bo).u32;
+	uint32_t pitch = gbm_bo_get_stride (bo);
+	uint32_t fb;
+	if(drmModeAddFB (g->device, g->mode_info.hdisplay, g->mode_info.vdisplay, 24, 32, pitch, handle, &fb)){
+		printf("drmModeAddFB() failed\n");
+		return;
 	}
-	// no connector found
-	return NULL;
-}
-
-/***************************************************************************/
-/** .
-\n\b Arguments:
-\n\b Returns:
-****************************************************************************/
-static drmModeEncoder *find_encoder (drmModeRes *resources, drmModeConnector *connector) 
-{
-	if (connector->encoder_id) {
-		return drmModeGetEncoder (device, connector->encoder_id);
+	if(drmModeSetCrtc (g->device, g->crtc->crtc_id, fb, 0, 0, &g->connector_id, 1, &g->mode_info)){
+		printf("drmModeSetCrtc() failed in proc %d @ %d\n",__LINE__, getpid());
+		return;
 	}
-	// no encoder found
-	return NULL;
-}
-
-
-/***************************************************************************/
-/** .
-\n\b Arguments:
-\n\b Returns:
-****************************************************************************/
-static void find_display_configuration () 
-{
-	int i;
-	drmModeRes *resources = drmModeGetResources (device);
-	// find a connector
-	drmModeConnector *connector = find_connector (resources);
-	if (!connector) EXIT ("no connector found\n");
-	// save the connector_id
-	connector_id = connector->connector_id;
-	/* print the modes */
-	for (i=0; i< connector->count_modes; ++i)
-		print_modeinfo(&connector->modes[i]);
-	// save the first mode
-	mode_info = connector->modes[0];
-	printf ("resolution: %ix%i\n", mode_info.hdisplay, mode_info.vdisplay);
-	// find an encoder
-	drmModeEncoder *encoder = find_encoder (resources, connector);
-	if (!encoder) EXIT ("no encoder found\n");
-	// find a CRTC
-	if (encoder->crtc_id) {
-		crtc = drmModeGetCrtc (device, encoder->crtc_id);
-	}
-	drmModeFreeEncoder (encoder);
-	drmModeFreeConnector (connector);
-	drmModeFreeResources (resources);
-}
-
-
-
-/***************************************************************************/
-/** .
-\n\b Arguments:
-\n\b Returns:
-****************************************************************************/
-static void setup_opengl (int render_only) 
-{
-	EGLConfig config;
-	EGLint num_config;
-	gbm_device = gbm_create_device (device);
-	display = eglGetDisplay (gbm_device);
-	eglInitialize (display, NULL, NULL);
 	
-	// create an OpenGL context
-	eglBindAPI (EGL_OPENGL_API);
+	if (g->previous_bo) {
+		drmModeRmFB (g->device, g->previous_fb);
+		gbm_surface_release_buffer (g->gbm_surface, g->previous_bo);
+	}
+	g->previous_bo = bo;
+	g->previous_fb = fb;
+}
+
+/***************************************************************************/
+/** .
+\n\b Arguments:
+\n\b Returns:
+****************************************************************************/
+static void draw (struct drm_gpu *g,int master, float progress) {
+	GLenum err;
+	glClearColor (1.0f-progress, progress, 0.0, 1.0);
+	if((err=glGetError()) != GL_NO_ERROR)
+		printf("glClearColor error %d\n",err);
+	glClear (GL_COLOR_BUFFER_BIT);
+	if((err=glGetError()) != GL_NO_ERROR)
+                printf("glClear error %d\n",err);
+	if(master)
+		swap_buffers (g);
+}
+
+/***************************************************************************/
+/** .
+\n\b Arguments:
+\n\b Returns:
+****************************************************************************/
+static void clean_up (struct drm_gpu *g) 
+{
+	// set the previous crtc
+	drmModeSetCrtc (g->device, g->crtc->crtc_id, g->crtc->buffer_id, g->crtc->x, 
+		g->crtc->y, &g->connector_id, 1, &g->crtc->mode);	
+	drmModeFreeCrtc (g->crtc);
+	
+	if (g->previous_bo) {
+		drmModeRmFB (g->device, g->previous_fb);
+		gbm_surface_release_buffer (g->gbm_surface, g->previous_bo);
+	}
+	
+	eglDestroySurface (g->display, g->egl_surface);
+	gbm_surface_destroy (g->gbm_surface);
+	eglDestroyContext (g->display, g->context);
+	eglTerminate (g->display);
+	gbm_device_destroy (g->gbm_device);
+}
+
+/***************************************************************************/
+/** .
+\n\b Arguments:
+\n\b Returns:
+****************************************************************************/
+int main (int argc, char *argv[]) 
+{
+	struct drm_gpu *g;
+	int master=1;
 	EGLint native_attributes[] = {
 		EGL_RED_SIZE, 8,
 		EGL_GREEN_SIZE, 8,
@@ -134,104 +96,20 @@ static void setup_opengl (int render_only)
 		EGL_BLUE_SIZE, 8,
 	  EGL_TEXTURE_TARGET,EGL_TEXTURE_2D,
 	EGL_NONE};
-	
-	eglChooseConfig (display, native_attributes, &config, 1, &num_config);
-	context = eglCreateContext (display, config, EGL_NO_CONTEXT, NULL);
-	
-	// create the GBM and EGL surface
-	gbm_surface = gbm_surface_create (gbm_device, mode_info.hdisplay, mode_info.vdisplay, GBM_BO_FORMAT_XRGB8888, GBM_BO_USE_SCANOUT|GBM_BO_USE_RENDERING);
-	egl_surface = eglCreateWindowSurface (display, config, gbm_surface, NULL);
-	eglMakeCurrent (display, egl_surface, egl_surface, context);
-}
-
-
-/***************************************************************************/
-/** .
-\n\b Arguments:
-\n\b Returns:
-****************************************************************************/
-static void swap_buffers () {
-	eglSwapBuffers (display, egl_surface);
-	struct gbm_bo *bo = gbm_surface_lock_front_buffer (gbm_surface);
-	uint32_t handle = gbm_bo_get_handle (bo).u32;
-	uint32_t pitch = gbm_bo_get_stride (bo);
-	uint32_t fb;
-	if(drmModeAddFB (device, mode_info.hdisplay, mode_info.vdisplay, 24, 32, pitch, handle, &fb)){
-		printf("drmModeAddFB() failed\n");
-		return;
-	}
-	if(drmModeSetCrtc (device, crtc->crtc_id, fb, 0, 0, &connector_id, 1, &mode_info)){
-		printf("drmModeSetCrtc() failed in proc %d @ %d\n",__LINE__, getpid());
-		return;
-	}
-	
-	if (previous_bo) {
-		drmModeRmFB (device, previous_fb);
-		gbm_surface_release_buffer (gbm_surface, previous_bo);
-	}
-	previous_bo = bo;
-	previous_fb = fb;
-}
-
-/***************************************************************************/
-/** .
-\n\b Arguments:
-\n\b Returns:
-****************************************************************************/
-static void draw (int master, float progress) {
-	GLenum err;
-	glClearColor (1.0f-progress, progress, 0.0, 1.0);
-	if((err=glGetError()) != GL_NO_ERROR)
-		printf("glClearColor error %d\n",err);
-	glClear (GL_COLOR_BUFFER_BIT);
-	if((err=glGetError()) != GL_NO_ERROR)
-                printf("glClear error %d\n",err);
-	if(master)
-		swap_buffers ();
-}
-
-/***************************************************************************/
-/** .
-\n\b Arguments:
-\n\b Returns:
-****************************************************************************/
-static void clean_up () {
-	// set the previous crtc
-	drmModeSetCrtc (device, crtc->crtc_id, crtc->buffer_id, crtc->x, crtc->y, &connector_id, 1, &crtc->mode);
-	drmModeFreeCrtc (crtc);
-	
-	if (previous_bo) {
-		drmModeRmFB (device, previous_fb);
-		gbm_surface_release_buffer (gbm_surface, previous_bo);
-	}
-	
-	eglDestroySurface (display, egl_surface);
-	gbm_surface_destroy (gbm_surface);
-	eglDestroyContext (display, context);
-	eglTerminate (display);
-	gbm_device_destroy (gbm_device);
-}
-
-/***************************************************************************/
-/** .
-\n\b Arguments:
-\n\b Returns:
-****************************************************************************/
-int main (int argc, char *argv[]) {
-	int master=1;
 	if(argc>1)
 		master=strtoul(argv[1],NULL,10);
 	printf("pid %d, I am %s\n",getpid(),1==master?"master":"Not master");
-	device = open ("/dev/dri/card0", O_RDWR|O_CLOEXEC);
-	find_display_configuration ();
-	setup_opengl (master);
+	
+	if(NULL == (g=find_display_configuration ("/dev/dri/card0")))
+		return -1;
+	setup_opengl (g,native_attributes, offscreen_attributes, master);
 	
 	int i;
 	for (i = 0; i < 600; i++)
-		draw (master, i / 600.0f);
+		draw (g, master, i / 600.0f);
 	
-	clean_up ();
-	close (device);
+	clean_up (g);
+	close (g->device);
 	return 0;
 }
 
