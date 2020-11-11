@@ -1,7 +1,11 @@
 all: dmabufshare
 
-dmabufshare: main.c socket.h window.h render.h
-	$(CC) main.c -g -lEGL -lGL -lX11 -o dmabufshare
+
+../open_egl.o: ../open_egl.c
+	$(MAKE) -C ../
+
+dmabufshare:../open_egl.o dmabufshare.c socket.h 
+	$(CC) -o $@ dmabufshare.c $< -g -lEGL -lGL -lgbm -I../ -o dmabufshare $$(pkg-config --libs --cflags libdrm)
 
 clean:
 	rm -f dmabufshare

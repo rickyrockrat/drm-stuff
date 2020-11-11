@@ -5,36 +5,138 @@
 #include <assert.h>
 #include <time.h>
 
-#include <X11/Xlib.h>
+
 #define GL_GLEXT_PROTOTYPES
 #include <GL/gl.h>
 #define EGL_EGLEXT_PROTOTYPES
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
+#include "open_egl.h"
 
 #include "socket.h"
-#include "window.h"
-#include "render.h"
 
 void parse_arguments(int argc, char **argv, int *is_server);
 void rotate_data(int data[4]);
+
+void gl_draw_scene(GLuint texture)
+{
+    // clear
+    glClearColor(0.2f, 0.3f, 0.3f, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT);
+
+    // draw quad
+    // VAO and shader program are already bound from the call to gl_setup_scene
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, texture);
+    glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0);
+}
+
+
+void gl_setup_scene()
+{
+    // Shader source that draws a textures quad
+    const char *vertex_shader_source = "#version 330 core\n"
+                                       "layout (location = 0) in vec3 aPos;\n"
+                                       "layout (location = 1) in vec2 aTexCoords;\n"
+
+                                       "out vec2 TexCoords;\n"
+
+                                       "void main()\n"
+                                       "{\n"
+                                       "   TexCoords = aTexCoords;\n"
+                                       "   gl_Position = vec4(aPos.x, aPos.y, aPos.z, 1.0);\n"
+                                       "}\0";
+    const char *fragment_shader_source = "#version 330 core\n"
+                                         "out vec4 FragColor;\n"
+
+                                         "in vec2 TexCoords;\n"
+
+                                         "uniform sampler2D Texture1;\n"
+
+                                         "void main()\n"
+                                         "{\n"
+                                         "   FragColor = texture(Texture1, TexCoords);\n"
+                                         "}\0";
+
+    // vertex shader
+    int vertex_shader = glCreateShader(GL_VERTEX_SHADER);
+    glShaderSource(vertex_shader, 1, &vertex_shader_source, NULL);
+    glCompileShader(vertex_shader);
+    // fragment shader
+    int fragment_shader = glCreateShader(GL_FRAGMENT_SHADER);
+    glShaderSource(fragment_shader, 1, &fragment_shader_source, NULL);
+    glCompileShader(fragment_shader);
+    // link shaders
+    int shader_program = glCreateProgram();
+    glAttachShader(shader_program, vertex_shader);
+    glAttachShader(shader_program, fragment_shader);
+    glLinkProgram(shader_program);
+    // delete shaders
+    glDeleteShader(vertex_shader);
+    glDeleteShader(fragment_shader);
+
+    // quad
+    float vertices[] = {
+        0.5f, 0.5f, 0.0f, 0.0f, 0.0f,   // top right
+        0.5f, -0.5f, 0.0f, 1.0f, 0.0f,  // bottom right
+        -0.5f, -0.5f, 0.0f, 1.0f, 1.0f, // bottom left
+        -0.5f, 0.5f, 0.0f, 0.0f, 1.0f   // top left
+    };
+    unsigned int indices[] = {
+        0, 1, 3, // first Triangle
+        1, 2, 3  // second Triangle
+    };
+
+    unsigned int VBO, VAO, EBO;
+    glGenVertexArrays(1, &VAO);
+    glGenBuffers(1, &VBO);
+    glGenBuffers(1, &EBO);
+    glBindVertexArray(VAO);
+
+    glBindBuffer(GL_ARRAY_BUFFER, VBO);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
+
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(indices), indices, GL_STATIC_DRAW);
+
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void *)0);
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void *)(3 * sizeof(float)));
+
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+
+    glBindVertexArray(0);
+
+    // Prebind needed stuff for drawing
+    glUseProgram(shader_program);
+    glBindVertexArray(VAO);
+}
+
 
 int main(int argc, char **argv)
 {
     // Parse arguments
     int is_server;
+		struct drm_gpu *g;
+		EGLint attribute_list_config[] = {
+        EGL_RED_SIZE, 8,
+        EGL_GREEN_SIZE, 8,
+        EGL_BLUE_SIZE, 8,
+        EGL_NONE};
+	
+	
+	
+	
     parse_arguments(argc, argv, &is_server);
-
-    // Create X11 window
-    Display *x11_display;
-    Window x11_window;
-    create_x11_window(is_server, &x11_display, &x11_window);
+  	if(NULL == (g=find_display_configuration("/dev/dri/card0")))
+  		return -1;
+	
+	
+		setup_opengl (g, attribute_list_config, NULL, is_server?0:1);  
 
     // Initialize EGL
-    EGLDisplay egl_display;
-    EGLContext egl_context;
-    EGLSurface egl_surface;
-    initialize_egl(x11_display, x11_window, &egl_display, &egl_context, &egl_surface);
+
 
     // Setup GL scene
     gl_setup_scene();
@@ -72,8 +174,8 @@ int main(int argc, char **argv)
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 
         // EGL: Create EGL image from the GL texture
-        EGLImage image = eglCreateImage(egl_display,
-                                        egl_context,
+        EGLImage image = eglCreateImage(g->display,
+                                        g->context,
                                         EGL_GL_TEXTURE_2D,
                                         (EGLClientBuffer)(uint64_t)texture,
                                         NULL);
@@ -90,7 +192,7 @@ int main(int argc, char **argv)
 
         PFNEGLEXPORTDMABUFIMAGEQUERYMESAPROC eglExportDMABUFImageQueryMESA =
             (PFNEGLEXPORTDMABUFIMAGEQUERYMESAPROC)eglGetProcAddress("eglExportDMABUFImageQueryMESA");
-        EGLBoolean queried = eglExportDMABUFImageQueryMESA(egl_display,
+        EGLBoolean queried = eglExportDMABUFImageQueryMESA(g->display,
                                                            image,
                                                            &texture_storage_metadata.fourcc,
                                                            NULL,
@@ -98,7 +200,7 @@ int main(int argc, char **argv)
         assert(queried);
         PFNEGLEXPORTDMABUFIMAGEMESAPROC eglExportDMABUFImageMESA =
             (PFNEGLEXPORTDMABUFIMAGEMESAPROC)eglGetProcAddress("eglExportDMABUFImageMESA");
-        EGLBoolean exported = eglExportDMABUFImageMESA(egl_display,
+        EGLBoolean exported = eglExportDMABUFImageMESA(g->display,
                                                        image,
                                                        &texture_dmabuf_fd,
                                                        &texture_storage_metadata.stride,
@@ -133,7 +235,7 @@ int main(int argc, char **argv)
             EGL_DMA_BUF_PLANE0_OFFSET_EXT, texture_storage_metadata.offset,
             EGL_DMA_BUF_PLANE0_PITCH_EXT, texture_storage_metadata.stride,
             EGL_NONE};
-        EGLImage image = eglCreateImage(egl_display,
+        EGLImage image = eglCreateImage(g->display,
                                         NULL,
                                         EGL_LINUX_DMA_BUF_EXT,
                                         (EGLClientBuffer)NULL,
@@ -158,7 +260,7 @@ int main(int argc, char **argv)
     {
         // Draw scene (uses shared texture)
         gl_draw_scene(texture);
-        eglSwapBuffers(egl_display, egl_surface);
+        eglSwapBuffers(g->display, g->egl_surface);
 
         // Update texture data each second to see that the client didn't just copy the texture and is indeed referencing
         // the same texture data.
