@@ -5,35 +5,6 @@
 
 
 
-
-/***************************************************************************/
-/** .
-\n\b Arguments:
-\n\b Returns:
-****************************************************************************/
-static void swap_buffers (struct drm_gpu *g) {
-	eglSwapBuffers (g->display, g->egl_surface);
-	struct gbm_bo *bo = gbm_surface_lock_front_buffer (g->gbm_surface);
-	uint32_t handle = gbm_bo_get_handle (bo).u32;
-	uint32_t pitch = gbm_bo_get_stride (bo);
-	uint32_t fb;
-	if(drmModeAddFB (g->device, g->mode_info.hdisplay, g->mode_info.vdisplay, 24, 32, pitch, handle, &fb)){
-		printf("drmModeAddFB() failed\n");
-		return;
-	}
-	if(drmModeSetCrtc (g->device, g->crtc->crtc_id, fb, 0, 0, &g->connector_id, 1, &g->mode_info)){
-		printf("drmModeSetCrtc() failed in proc %d @ %d\n",__LINE__, getpid());
-		return;
-	}
-	
-	if (g->previous_bo) {
-		drmModeRmFB (g->device, g->previous_fb);
-		gbm_surface_release_buffer (g->gbm_surface, g->previous_bo);
-	}
-	g->previous_bo = bo;
-	g->previous_fb = fb;
-}
-
 /***************************************************************************/
 /** .
 \n\b Arguments:
@@ -48,31 +19,7 @@ static void draw (struct drm_gpu *g,int master, float progress) {
 	if((err=glGetError()) != GL_NO_ERROR)
                 printf("glClear error %d\n",err);
 	if(master)
-		swap_buffers (g);
-}
-
-/***************************************************************************/
-/** .
-\n\b Arguments:
-\n\b Returns:
-****************************************************************************/
-static void clean_up (struct drm_gpu *g) 
-{
-	// set the previous crtc
-	drmModeSetCrtc (g->device, g->crtc->crtc_id, g->crtc->buffer_id, g->crtc->x, 
-		g->crtc->y, &g->connector_id, 1, &g->crtc->mode);	
-	drmModeFreeCrtc (g->crtc);
-	
-	if (g->previous_bo) {
-		drmModeRmFB (g->device, g->previous_fb);
-		gbm_surface_release_buffer (g->gbm_surface, g->previous_bo);
-	}
-	
-	eglDestroySurface (g->display, g->egl_surface);
-	gbm_surface_destroy (g->gbm_surface);
-	eglDestroyContext (g->display, g->context);
-	eglTerminate (g->display);
-	gbm_device_destroy (g->gbm_device);
+		swap_buffers (1,g);
 }
 
 /***************************************************************************/
