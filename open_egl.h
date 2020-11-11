@@ -39,10 +39,34 @@ struct drm_gpu {
 	drmModeCrtc *crtc;	
 	
 };
+
+const char *glErrorString(GLint error);
+const char *eglErrorString(EGLint error);
 void print_modeinfo(drmModeModeInfo  *m);
 drmModeConnector *find_connector (int fd, drmModeRes *resources);
 drmModeEncoder *find_encoder (int fd, drmModeRes *resources, drmModeConnector *connector);
-drm_gpu *find_display_configuration ( char *device );
+struct drm_gpu *find_display_configuration ( char *device );
 int setup_opengl (struct drm_gpu *g, EGLint *native_attr, EGLint *off_att, int render_only );
+void swap_buffers (int is_master, struct drm_gpu *g);
+void clean_up (struct drm_gpu *g) ;
+
+#define STRINGIFY(x) (#x)
+
+#define EGLCHK(n,x) do { \
+	EGLint err; \
+	x; \
+	if(EGL_SUCCESS != (err=eglGetError())) \
+				printf("%s: EGL Error %s: %d (%s)\n",n,STRINGIFY(x), err, eglErrorString(err)); \
+}while(0)
+
+#define GLCHK(n,x) do { \
+	GLint err; \
+	x; \
+	if(GL_NO_ERROR != (err=glGetError())) \
+		printf("%s: GL error %s: %d (%s)\n",n,STRINGIFY(x),err, glErrorString(err)); \
+}while(0)
+
+
+				
 
 #endif
