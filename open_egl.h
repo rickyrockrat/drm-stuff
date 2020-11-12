@@ -47,7 +47,8 @@ drmModeConnector *find_connector (int fd, drmModeRes *resources);
 drmModeEncoder *find_encoder (int fd, drmModeRes *resources, drmModeConnector *connector);
 struct drm_gpu *find_display_configuration ( char *device );
 int setup_opengl (struct drm_gpu *g, EGLint *native_attr, EGLint *off_att, int render_only );
-void swap_buffers (int is_master, struct drm_gpu *g);
+void swap_buffers (int is_master, struct drm_gpu *g, uint32_t user_handle);
+/*void swap_buffers (int is_master, struct drm_gpu *g); */
 void clean_up (struct drm_gpu *g) ;
 
 #define STRINGIFY(x) (#x)

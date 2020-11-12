@@ -14,7 +14,6 @@ void parse_arguments(int argc, char **argv, int *is_server);
 void rotate_data(int data[4]);
 
 
-
 void gl_draw_scene(int is_server, GLuint texture)
 {
 		char *n;
@@ -32,6 +31,7 @@ void gl_draw_scene(int is_server, GLuint texture)
     GLCHK(n,glBindTexture(GL_TEXTURE_2D, texture));
     GLCHK(n,glDrawElements(GL_TRIANGLES, 6, GL_UNSIGNED_INT, 0));
 }
+
 
 int compile_shader(char *n, GLuint shader)
 {
@@ -60,6 +60,7 @@ int compile_shader(char *n, GLuint shader)
 	}
 	return 0;
 }
+
 
 int gl_setup_scene(int is_server)
 {
@@ -161,6 +162,7 @@ int main(int argc, char **argv)
 	int is_server;
 	struct drm_gpu *g;
 	char *n;
+	int texture_dmabuf_fd;
 	EGLint attribute_list_config[] = {
         EGL_RED_SIZE, 8,
         EGL_GREEN_SIZE, 8,
@@ -229,7 +231,6 @@ int main(int argc, char **argv)
 		
 		// EGL (extension: EGL_MESA_image_dma_buf_export): Get file descriptor (texture_dmabuf_fd) for the EGL image and get its
 		// storage data (texture_storage_metadata - fourcc, stride, offset)
-		int texture_dmabuf_fd;
 		struct texture_storage_metadata_t texture_storage_metadata;
 		
 		PFNEGLEXPORTDMABUFIMAGEQUERYMESAPROC eglExportDMABUFImageQueryMESA =
@@ -242,12 +243,15 @@ int main(int argc, char **argv)
 		assert(queried);
 		PFNEGLEXPORTDMABUFIMAGEMESAPROC eglExportDMABUFImageMESA =
 		    (PFNEGLEXPORTDMABUFIMAGEMESAPROC)eglGetProcAddress("eglExportDMABUFImageMESA");
+																												 
 		EGLBoolean exported = eglExportDMABUFImageMESA(g->display,
 		                                               image,
 		                                               &texture_dmabuf_fd,
 		                                               &texture_storage_metadata.stride,
 		                                               &texture_storage_metadata.offset);
 		assert(exported);
+		gl_draw_scene(is_server,texture);
+		swap_buffers(1,g,texture_dmabuf_fd);
 		printf("Waiting on Client to connect\n");
 		// Unix Domain Socket: Send file descriptor (texture_dmabuf_fd) and texture storage data (texture_storage_metadata)
 		int sock = create_socket(SERVER_FILE);
@@ -256,10 +260,10 @@ int main(int argc, char **argv)
 		write_fd(sock, texture_dmabuf_fd, &texture_storage_metadata, sizeof(texture_storage_metadata));
 		close(sock);
 		close(texture_dmabuf_fd);
-		printf("Sent Client data\n");
+		printf("Sent Client data %d fd\n",texture_dmabuf_fd);
   }else {
 		// Unix Domain Socket: Receive file descriptor (texture_dmabuf_fd) and texture storage data (texture_storage_metadata)
-		int texture_dmabuf_fd;
+		
 		struct texture_storage_metadata_t texture_storage_metadata;
 		
 		int sock = create_socket(CLIENT_FILE);
@@ -267,7 +271,7 @@ int main(int argc, char **argv)
 		printf("Waiting on Server\n");
 		read_fd(sock, &texture_dmabuf_fd, &texture_storage_metadata, sizeof(texture_storage_metadata));
 		close(sock);
-		printf("Got Data from server\n");
+		printf("Got Data from server %d fd\n",texture_dmabuf_fd);
 		
 		// EGL (extension: EGL_EXT_image_dma_buf_import): Create EGL image from file descriptor (texture_dmabuf_fd) and storage
 		// data (texture_storage_metadata)
@@ -310,14 +314,14 @@ int main(int argc, char **argv)
 			
       last_time = cur_time;
 			if(is_server)
-				swap_buffers(1,g);
+				swap_buffers(1,g,texture_dmabuf_fd);
 			else {
 				
 				rotate_data(texture_data);
 	      GLCHK(n,glBindTexture(GL_TEXTURE_2D, texture));
 	      GLCHK(n,glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 2, 2, GL_RGBA, GL_UNSIGNED_BYTE, texture_data));	
 				gl_draw_scene(is_server,texture);
-				eglSwapBuffers (g->display, g->egl_surface);
+				/*eglSwapBuffers (g->display, g->egl_surface); */
 			}
       
 			// Check for errors

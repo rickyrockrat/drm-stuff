@@ -258,7 +258,7 @@ int setup_opengl (struct drm_gpu *g, EGLint *native_attr, EGLint *off_att, int r
 \n\b Arguments:
 \n\b Returns:
 ****************************************************************************/
-void swap_buffers (int is_master, struct drm_gpu *g) 
+void swap_buffers (int is_master, struct drm_gpu *g, uint32_t user_handle) 
 {
 	struct gbm_bo *bo;
 	uint32_t handle;
@@ -267,24 +267,25 @@ void swap_buffers (int is_master, struct drm_gpu *g)
 	eglSwapBuffers (g->display, g->egl_surface);
 	if(0 == is_master)
 		return;
-	bo = gbm_surface_lock_front_buffer (g->gbm_surface);
-	handle = gbm_bo_get_handle (bo).u32;
-	pitch = gbm_bo_get_stride (bo);
-	if(is_master){
-		if(drmModeAddFB (g->device, g->mode_info.hdisplay, g->mode_info.vdisplay, 24, 32, pitch, handle, &fb)){
-			printf("drmModeAddFB() failed\n");
-			return;
-		}
-		if(drmModeSetCrtc (g->device, g->crtc->crtc_id, fb, 0, 0, &g->connector_id, 1, &g->mode_info)){
-			printf("drmModeSetCrtc() failed in proc %d @ %d\n",__LINE__, getpid());
-			return;
-		}	
+	if(0 == user_handle ){
+		bo = gbm_surface_lock_front_buffer (g->gbm_surface);
+		handle = gbm_bo_get_handle (bo).u32;
+		pitch = gbm_bo_get_stride (bo);
+	}	else
+		handle=user_handle;
+	/* Create a frame buffer object with the drm_buf handle provided*/
+	if(drmModeAddFB (g->device, g->mode_info.hdisplay, g->mode_info.vdisplay, 24, 32, pitch, handle, &fb)){
+		printf("drmModeAddFB() failed\n");
+		return;
 	}
+	if(drmModeSetCrtc (g->device, g->crtc->crtc_id, fb, 0, 0, &g->connector_id, 1, &g->mode_info)){
+		printf("drmModeSetCrtc() failed in proc %d @ %d\n",__LINE__, getpid());
+		return;
+	}	
 	
 	
 	if (g->previous_bo) {
-		if(is_master)
-			drmModeRmFB (g->device, g->previous_fb);
+		drmModeRmFB (g->device, g->previous_fb);
 		gbm_surface_release_buffer (g->gbm_surface, g->previous_bo);
 	}
 	g->previous_bo = bo;
